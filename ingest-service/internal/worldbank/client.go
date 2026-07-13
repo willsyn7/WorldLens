@@ -11,7 +11,16 @@ import (
 	"time"
 )
 
-const defaultBaseURL = "https://api.worldbank.org/v2"
+const (
+	defaultBaseURL = "https://api.worldbank.org/v2"
+
+	// maxAttempts is the total number of tries for a single page fetch,
+	// including the first attempt.
+	maxAttempts = 4
+)
+
+// retryBackoff is a var (not const) so tests can shorten it.
+var retryBackoff = 500 * time.Millisecond
 
 // IndicatorRecord is one (country, indicator, year) observation.
 type IndicatorRecord struct {
@@ -44,11 +53,13 @@ type wbEnvelope struct {
 	Data     []wbDataPoint
 }
 
+// wbMetadata only captures the fields StreamIndicator needs to paginate.
+// The World Bank API is inconsistent about whether per_page/total are
+// quoted, so those unused fields are intentionally omitted rather than
+// worked around.
 type wbMetadata struct {
-	Page    int `json:"page"`
-	Pages   int `json:"pages"`
-	PerPage int `json:"per_page,string"`
-	Total   int `json:"total"`
+	Page  int `json:"page"`
+	Pages int `json:"pages"`
 }
 
 type wbDataPoint struct {
@@ -127,7 +138,36 @@ func (c *Client) StreamIndicator(ctx context.Context, countryCode, indicatorCode
 	}
 }
 
+// fetchPage retries transient failures (network errors and 5xx responses)
+// with a linear backoff, since the World Bank API occasionally times out
+// or briefly 5xxs under load. 4xx responses (e.g. an invalid country or
+// indicator code) are not retried, since retrying won't change the result.
 func (c *Client) fetchPage(ctx context.Context, countryCode, indicatorCode string, startYear, endYear, page int) (*wbEnvelope, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if attempt > 1 {
+			select {
+			case <-time.After(retryBackoff * time.Duration(attempt-1)):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		envelope, retryable, err := c.doFetchPage(ctx, countryCode, indicatorCode, startYear, endYear, page)
+		if err == nil {
+			return envelope, nil
+		}
+		lastErr = err
+		if !retryable {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("worldbank: giving up after %d attempts: %w", maxAttempts, lastErr)
+}
+
+// doFetchPage performs a single HTTP attempt. The returned bool reports
+// whether the error, if any, is worth retrying.
+func (c *Client) doFetchPage(ctx context.Context, countryCode, indicatorCode string, startYear, endYear, page int) (*wbEnvelope, bool, error) {
 	url := fmt.Sprintf("%s/country/%s/indicator/%s?format=json&per_page=1000&page=%d",
 		c.baseURL, countryCode, indicatorCode, page)
 	if startYear != 0 && endYear != 0 {
@@ -136,22 +176,25 @@ func (c *Client) fetchPage(ctx context.Context, countryCode, indicatorCode strin
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("worldbank: building request: %w", err)
+		return nil, false, fmt.Errorf("worldbank: building request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("worldbank: request failed: %w", err)
+		return nil, true, fmt.Errorf("worldbank: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 500 {
+		return nil, true, fmt.Errorf("worldbank: server error status %d for %s", resp.StatusCode, url)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("worldbank: unexpected status %d for %s", resp.StatusCode, url)
+		return nil, false, fmt.Errorf("worldbank: unexpected status %d for %s", resp.StatusCode, url)
 	}
 
 	var envelope wbEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return nil, fmt.Errorf("worldbank: decoding response from %s: %w", url, err)
+		return nil, false, fmt.Errorf("worldbank: decoding response from %s: %w", url, err)
 	}
-	return &envelope, nil
+	return &envelope, false, nil
 }
