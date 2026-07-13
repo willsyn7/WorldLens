@@ -15,7 +15,7 @@ invest there, grounded in World Bank economic and governance data.
 ```
 World Bank API (public, no key)
     → gRPC stream (Go, ingest-service)         [built]
-    → Python ETL (clean/transform)              [not yet built]
+    → Python ETL (clean/transform)              [built]
     → Cloud SQL / Postgres                       [schema built + live]
         ↓
     → THIS SERVICE (Express.js + TypeScript)
@@ -24,10 +24,12 @@ World Bank API (public, no key)
 ```
 
 The Go ingest service and Python ETL run on a 5-minute schedule, independent
-of user requests, and keep Cloud SQL populated. **This backend only reads
-from Cloud SQL and calls Vertex AI — it does not touch the World Bank API or
-the ingestion pipeline.** Keep it fast: no live scraping, no long-running
-work in the request path.
+of user requests, and keep Cloud SQL populated for countries that are
+already tracked. **This backend never talks to the World Bank API
+directly** — but it does talk to `ingest-service` over gRPC, for exactly
+one case: a user requests a country that isn't tracked yet (see "On-demand
+ingestion" below). For already-tracked countries, keep the request path
+fast: just a DB read and a Vertex AI call, no live fetching.
 
 ## Your job
 
@@ -93,8 +95,10 @@ Currently tracked indicators (14, all seeded in `indicators`):
 | `GOV_WGI_CC.EST` | Control of Corruption - Governance estimate (approx. -2.5 to +2.5) |
 | `GOV_WGI_RQ.EST` | Regulatory Quality - Governance estimate (approx. -2.5 to +2.5) |
 
-Only `MM` (Myanmar) is seeded in `countries` right now — treat the tracked
-country list as growable, don't hardcode "Myanmar" anywhere in logic.
+Only `MM` (Myanmar) is seeded in `countries` right now, but `countries` is
+meant to grow as users request new countries — see "On-demand ingestion"
+below. Don't hardcode "Myanmar" or any fixed country list anywhere in
+logic.
 
 There is deliberately **no pre-aggregated stats table**. The read pattern
 per request (all years for ~14 indicators, one country) is small; query
@@ -112,6 +116,65 @@ package (IAM/instance-connection-name based, works cleanly from Cloud Run)
 with a Postgres client (`pg`). The instance connection name format is
 `PROJECT_ID:REGION:INSTANCE_ID`.
 
+## On-demand ingestion for untracked countries
+
+The `countries` table is not a fixed allowlist — it's meant to grow as real
+users ask for real countries. It only makes sense to track countries people
+actually care about, not pre-populate every ISO code up front. So when a
+request comes in for a country that isn't in `countries` yet, do this
+instead of a flat 404:
+
+1. Validate `:code` is a plausible ISO alpha-2 code (existing regex check
+   is fine), then check `countries` for it. If found, skip straight to the
+   normal read path.
+2. If not found, look it up against the World Bank API directly to confirm
+   it's a real country (not just a well-formed but bogus 2-letter code, and
+   not a region/aggregate — World Bank's country endpoint mixes both):
+   `GET https://api.worldbank.org/v2/country/{code}?format=json`. Response
+   shape is `[metadata, [countryObject]]`; `countryObject.region.id` is
+   `"NA"` for aggregates/regions (e.g. "East Asia & Pacific") — reject
+   those. If the lookup comes back empty or is an aggregate, **that's** the
+   real 404 case now — genuinely invalid input, not "not tracked yet."
+3. `INSERT INTO countries (code, name) VALUES ($1, $2) ON CONFLICT (code)
+   DO NOTHING` (guards concurrent requests for the same new country).
+4. Fetch data for this one country now, synchronously, rather than waiting
+   up to 5 minutes for the next scheduled ETL run:
+   - Read all rows from `indicators` (the tracked indicator list).
+   - Call `ingest-service`'s `CountryDataService.StreamCountryIndicators`
+     gRPC method — **one call per indicator, run concurrently**, not one
+     call with all indicator codes in the request. A prior smoke test of
+     the Python ETL found that batching many indicators into a single
+     streaming call lets World Bank's inconsistent per-indicator latency
+     exhaust one shared client deadline before every indicator is fetched;
+     per-indicator calls isolate that, same as the ETL does in
+     `etl/src/worldlens_etl/grpc_client.py` — worth reading that file for
+     the concurrency/timeout/retry pattern to mirror here. Use
+     `@grpc/grpc-js` with `@grpc/proto-loader` against
+     `proto/worldbank/v1/country_data.proto` (dynamic loading is enough
+     here; no need for a generated-stubs build step for one client call
+     site).
+   - Upsert the results into `indicator_observations` as a **single
+     multi-row `INSERT ... VALUES (...), (...), ... ON CONFLICT ... DO
+     UPDATE`**, not one `INSERT` per row. The Python ETL hit a real
+     performance bug here — `pg8000`'s `executemany()` round-trips once
+     per row, turning a sub-second write into minutes — before switching
+     to a single batched multi-row statement. Node's `pg` driver doesn't
+     have that specific problem since parameterized queries with many
+     placeholders are still one round trip, but still build one
+     multi-row `INSERT`, not a loop of single-row `INSERT`s, for the same
+     reason: minimize round trips.
+5. Now proceed with the normal read path (query `indicator_observations`,
+   build the prompt, call Vertex AI).
+
+This means a first-ever request for a brand-new country will be
+noticeably slower than a cached one (World Bank's latency is inconsistent
+— budget for it, e.g. a generous per-indicator gRPC timeout in the 30-45s
+range, matching the ETL's default). Every subsequent request for that same
+country is back to the fast DB-only path, and the regular 5-minute ETL
+schedule takes over keeping it fresh from then on.
+
+`INGEST_SERVICE_ADDR` (see env vars below) is the gRPC target for this.
+
 ## Environment variables
 
 Read from `.env` (see `.env.example` at the repo root — do not commit real
@@ -127,6 +190,8 @@ GCP_PROJECT_ID=
 GCP_REGION=
 VERTEX_MODEL_ID=
 GOOGLE_APPLICATION_CREDENTIALS=
+
+INGEST_SERVICE_ADDR=
 ```
 
 ## Vertex AI
@@ -187,10 +252,10 @@ GET /api/v1/country/:code
 GET /api/v2/country/:code
 ```
 
-- `:code` is the ISO alpha-2 country code (e.g. `MM`), matching
-  `countries.code`.
-- If `:code` isn't in `countries`, return 404 — don't silently proceed with
-  an empty dataset.
+- `:code` is the ISO alpha-2 country code (e.g. `MM`).
+- If `:code` isn't in `countries` yet, run the on-demand ingestion flow
+  above rather than 404ing. Only return 404 if the World Bank lookup
+  confirms `:code` isn't a real country.
 - Query all rows from `indicator_observations` (joined with `indicators`
   for names) for that country, ordered by indicator then year.
 - Build the prompt, call Vertex AI, return the response.
