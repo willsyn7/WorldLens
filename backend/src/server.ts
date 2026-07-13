@@ -2,6 +2,7 @@ import express from 'express';
 import { config } from './config.js';
 import { closeDb } from './db.js';
 import { countryRouterV1 } from './routes/country.js';
+import { DatabaseError, VertexError } from './errors.js';
 
 const app = express();
 
@@ -12,7 +13,17 @@ app.get('/healthz', (_req, res) => {
 app.use(countryRouterV1);
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err);
+  if (err instanceof DatabaseError) {
+    console.error(`${err.message}:`, err.cause);
+    res.status(503).json({ error: 'database unavailable' });
+    return;
+  }
+  if (err instanceof VertexError) {
+    console.error(`${err.message}:`, err.cause);
+    res.status(502).json({ error: 'upstream model call failed' });
+    return;
+  }
+  console.error('unexpected error:', err);
   res.status(500).json({ error: 'internal server error' });
 });
 

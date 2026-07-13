@@ -2,6 +2,9 @@
 .env.*
 !.env.example
 
+# Local-only notes, not for git history
+DEBUGGING_LOG.md
+
 # Python
 .venv/
 __pycache__/
