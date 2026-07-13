@@ -114,7 +114,8 @@ worldlens/
 │       ├── grpcserver/        # gRPC server implementation
 │       └── gen/                # generated protobuf/grpc code
 ├── etl/                       # Python ETL layer
-├── db/                        # schema/migrations
+├── db/
+│   └── migrations/            # numbered, plain-SQL schema migrations
 ├── backend/                   # TypeScript backend
 └── infra/                     # Cloud Run deploy configs
 ```
@@ -129,10 +130,29 @@ Copy `.env.example` to `.env` and fill in real values (never commit `.env`):
 
 The World Bank API itself requires no key.
 
+## Database schema
+
+Three tables, applied via `db/migrations/0001_init.sql`:
+
+- `countries` — reference table of tracked countries (code, name)
+- `indicators` — reference table of tracked World Bank indicator codes (code, name)
+- `indicator_observations` — fact table, one row per (country, indicator, year), upserted by the ETL on each run
+
+`db/migrations/0002_seed.sql` seeds `indicators` with the World Bank codes
+listed above and `countries` with Myanmar as the initial tracked country.
+
+No separate pre-aggregated stats table — the backend's read pattern (recent
+years, ~14 indicators, one country) is small enough for the indexed fact
+table directly. Revisit only if that stops being fast enough.
+
 ## Status
 
 `ingest-service` (Go gRPC layer) is implemented: World Bank REST client with
 pagination handling, `CountryDataService.StreamCountryIndicators` gRPC
 server, and a `main.go` entrypoint with a gRPC health check and graceful
-shutdown. Not yet built: the Python ETL layer, DB schema, and the TypeScript
-backend.
+shutdown.
+
+The DB schema is designed and applied to the live Cloud SQL instance.
+
+Not yet built: the Python ETL layer (to actually populate the tables on a
+schedule) and the TypeScript backend.
