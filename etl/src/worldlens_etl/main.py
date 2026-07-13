@@ -14,9 +14,16 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from worldlens_etl import grpc_client
 from worldlens_etl.db import Database
+
+# Dev convenience only: loads the repo-root .env if present, without
+# overriding real environment variables (e.g. those set by Cloud Run).
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)

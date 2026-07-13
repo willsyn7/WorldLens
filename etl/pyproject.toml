@@ -6,6 +6,7 @@ dependencies = [
     "grpcio>=1.82",
     "cloud-sql-python-connector[pg8000]>=1.20",
     "pg8000>=1.31",
+    "python-dotenv>=1.0",
 ]
 
 [tool.setuptools.packages.find]
