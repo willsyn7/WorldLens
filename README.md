@@ -145,14 +145,3 @@ No separate pre-aggregated stats table — the backend's read pattern (recent
 years, ~14 indicators, one country) is small enough for the indexed fact
 table directly. Revisit only if that stops being fast enough.
 
-## Status
-
-`ingest-service` (Go gRPC layer) is implemented: World Bank REST client with
-pagination handling, `CountryDataService.StreamCountryIndicators` gRPC
-server, and a `main.go` entrypoint with a gRPC health check and graceful
-shutdown.
-
-The DB schema is designed and applied to the live Cloud SQL instance.
-
-Not yet built: the Python ETL layer (to actually populate the tables on a
-schedule) and the TypeScript backend.
