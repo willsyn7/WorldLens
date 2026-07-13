@@ -2,7 +2,7 @@ import express from 'express';
 import { config } from './config.js';
 import { closeDb } from './db.js';
 import { countryRouterV1 } from './routes/country.js';
-import { DatabaseError, VertexError } from './errors.js';
+import { DatabaseError, VertexError, WorldBankError } from './errors.js';
 
 const app = express();
 
@@ -21,6 +21,11 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
   if (err instanceof VertexError) {
     console.error(`${err.message}:`, err.cause);
     res.status(502).json({ error: 'upstream model call failed' });
+    return;
+  }
+  if (err instanceof WorldBankError) {
+    console.error(`${err.message}:`, err.cause);
+    res.status(502).json({ error: 'upstream country validation call failed' });
     return;
   }
   console.error('unexpected error:', err);

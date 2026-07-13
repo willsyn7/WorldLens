@@ -26,4 +26,5 @@ export const config = {
     region: required('GCP_REGION'),
     modelId: required('VERTEX_MODEL_ID'),
   },
+  ingestServiceAddr: required('INGEST_SERVICE_ADDR'),
 };

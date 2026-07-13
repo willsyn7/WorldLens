@@ -11,3 +11,10 @@ export class VertexError extends Error {
     this.name = 'VertexError';
   }
 }
+
+export class WorldBankError extends Error {
+  constructor(message: string, public readonly cause: unknown) {
+    super(message);
+    this.name = 'WorldBankError';
+  }
+}

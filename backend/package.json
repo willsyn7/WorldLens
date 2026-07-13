@@ -16,6 +16,8 @@
   "dependencies": {
     "@google-cloud/cloud-sql-connector": "^1.11.2",
     "@google/genai": "^2.11.0",
+    "@grpc/grpc-js": "^1.14.4",
+    "@grpc/proto-loader": "^0.8.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.22.0"
