@@ -25,11 +25,14 @@ World Bank API (public, no key)
 
 The Go ingest service and Python ETL run on a 5-minute schedule, independent
 of user requests, and keep Cloud SQL populated for countries that are
-already tracked. **This backend never talks to the World Bank API
-directly** — but it does talk to `ingest-service` over gRPC, for exactly
-one case: a user requests a country that isn't tracked yet (see "On-demand
-ingestion" below). For already-tracked countries, keep the request path
-fast: just a DB read and a Vertex AI call, no live fetching.
+already tracked. **Bulk indicator data only ever comes from
+`ingest-service` over gRPC — this backend never re-implements that
+streaming fetch itself.** It does make two kinds of calls outside the DB,
+both only in the untracked-country path (see "On-demand ingestion" below):
+one lightweight direct call to the World Bank REST API to validate a new
+country code and get its name, and gRPC calls to `ingest-service` to fetch
+that country's indicator data. For already-tracked countries, keep the
+request path fast: just a DB read and a Vertex AI call, no live fetching.
 
 ## Your job
 
