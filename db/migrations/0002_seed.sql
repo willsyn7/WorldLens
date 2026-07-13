@@ -12,7 +12,7 @@ INSERT INTO indicators (code, name) VALUES
     ('NE.TRD.GNFS.ZS',    'Trade (% of GDP)'),
     ('SL.UEM.TOTL.ZS',    'Unemployment, total (% of labor force)'),
     ('SP.POP.TOTL',       'Population, total'),
-    ('PV.EST',            'Political Stability and Absence of Violence/Terrorism: Estimate'),
-    ('RL.EST',            'Rule of Law: Estimate'),
-    ('CC.EST',            'Control of Corruption: Estimate'),
-    ('RQ.EST',            'Regulatory Quality: Estimate');
+    ('GOV_WGI_PV.EST',    'Political Stability - Governance estimate (approx. -2.5 to +2.5)'),
+    ('GOV_WGI_RL.EST',    'Rule of Law - Governance estimate (approx. -2.5 to +2.5)'),
+    ('GOV_WGI_CC.EST',    'Control of Corruption - Governance estimate (approx. -2.5 to +2.5)'),
+    ('GOV_WGI_RQ.EST',    'Regulatory Quality - Governance estimate (approx. -2.5 to +2.5)');
