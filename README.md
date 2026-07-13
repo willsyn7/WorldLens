@@ -32,6 +32,10 @@ User selects a country
     → response returned to user
 ```
 
+See [`backend/FLOW.md`](backend/FLOW.md) for a detailed diagram of the `v1`
+request flow, including the on-demand ingestion path for a country that
+isn't tracked yet.
+
 ## Why gRPC streaming for ingestion
 
 The World Bank API paginates its responses. Rather than buffering an entire
