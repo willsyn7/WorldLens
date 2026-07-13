@@ -86,7 +86,7 @@ source, not from this pipeline.
 - Triggered every 5 min via Cloud Scheduler → Cloud Run job (no orchestrator like Airflow/Dagster — one linear pipeline doesn't need one yet)
 
 **Database**
-- Google Cloud SQL (tentative — not finalized)
+- Google Cloud SQL
 - A pre-aggregated stats table, refreshed each ETL run, for fast reads
 
 **Backend (`backend`)**
