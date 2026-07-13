@@ -18,7 +18,7 @@ World Bank API (public, no key)
 
 Every 5 minutes, the ETL layer calls the Go gRPC service to stream indicator
 data for tracked countries, cleans it, and loads it into Cloud SQL, including
-a pre-aggregated stats table used for charts.
+a pre-aggregated stats table for fast reads.
 
 User-facing requests are served separately and stay fast, since they only
 read already-loaded data:
@@ -70,6 +70,36 @@ World Bank data is economic/statistical only — it has no notion of discrete
 political events (e.g. a coup). Any narrative "why" behind a trend either
 comes from Vertex AI's own background knowledge or a separate events data
 source, not from this pipeline.
+
+## Tech stack
+
+**Data ingestion (`ingest-service`)**
+- Go 1.25
+- gRPC (`google.golang.org/grpc`) + Protocol Buffers, managed with `buf`
+- Standard `net/http` client against the public World Bank REST API
+
+**ETL (`etl`)**
+- Python
+- `grpcio` — gRPC client consuming `ingest-service`
+- pandas — cleaning/transforming indicator data
+- SQLAlchemy (or `psycopg2`/`asyncpg`) — loading into Cloud SQL
+- Triggered every 5 min via Cloud Scheduler → Cloud Run job (no orchestrator like Airflow/Dagster — one linear pipeline doesn't need one yet)
+
+**Database**
+- Google Cloud SQL (tentative — not finalized)
+- A pre-aggregated stats table, refreshed each ETL run, for fast reads
+
+**Backend (`backend`)**
+- TypeScript / Node.js
+- Versioned routes (`v1` hardcoded prompt, `v2` adds JSON schema validation)
+- Google Vertex AI SDK — calls a Gemini model with a prompt built from SQL-queried data
+
+**Infra & tooling**
+- Google Cloud Platform — Cloud Run (all services), Cloud Scheduler
+- Docker (multi-stage builds, distroless runtime images)
+- `protoc-gen-go`, `protoc-gen-go-grpc`, `buf` — proto codegen
+- `grpcurl` — manual gRPC smoke testing
+- Git / GitHub
 
 ## Repository layout
 
